@@ -43,12 +43,12 @@ void req_destroy(Req req){
     free(req);
 }
 
-bool q_initialize(Queue q, int max_size);
-void q_destroy(Queue q);
-void q_push(Queue q, void* val);
-Req q_pop(Queue q);
-Req q_get(Queue q, int pos);
-void q_set(Queue q, int pos, Req req);
+bool q_initialize(int max_size);
+void q_destroy();
+void q_push(void* val);
+Req q_pop();
+Req q_get(int pos);
+void q_set(int pos, Req req);
 
 Req create_new_request(int connfd);  // TADA!
 
@@ -83,8 +83,7 @@ void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_si
 
 //TADA
 void* work(void* ptr) {
-    Queue q = (Queue) ptr;
-    while (requests == 0) {
+    while (requests =) {
         pthread_cond_wait(&pend_and_free, &global_lock);
         pthread_mutex_lock(&global_lock);
         if (requests) {
@@ -95,17 +94,23 @@ void* work(void* ptr) {
 
 }
 
-static void initialize_threads(int thread_count, pthread_t *workers, Queue q){
+static void initialize_threads(int thread_count, pthread_t *workers){
     for (i = 0, i < thread_count, i++) {
-        pthread_create(&workers[i], NULL, work, q);
+        pthread_create(&workers[i], NULL, work);
     }
 }
 
 
 //with lock
-static inline is_overload(Queue q){
+static inline is_overload(){
     return q->total_count == q->max;
 }
+//in use for push&pop pending request by main | workers
+pthread_mutex_t global_lock;  //for every access to req_queue and for conditions
+pthread_cond_t pend_and_free;  //availiable pending for workers
+pthread_cond_t queue_not_full;  //availiable slots for new pendings (for 'block' schedlag)
+struct queue_t req_queue;
+Queue q = &req_queue;
 
 int main(int argc, char *argv[])
 {
@@ -119,13 +124,7 @@ int main(int argc, char *argv[])
     int busy_threads = 0;
     int requests = 0;
 
-    //in use for push&pop pending request by main | workers
-    pthread_mutex_t global_lock;  //for every access to req_queue and for conditions
-    pthread_cond_t pend_and_free;  //availiable pending for workers
-    pthread_cond_t queue_not_full;  //availiable slots for new pendings (for 'block' schedlag)
-
-    struct queue_t req_queue;
-    q_initialize(&req_queue, queue_size);
+    q_initialize(queue_size);
 
     pthread_t *workers = malloc(thread_count * sizeof(pthread_t));
     initialize_threads(thread_count, workers);
@@ -136,11 +135,11 @@ int main(int argc, char *argv[])
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
         Req new_req = create_new_req(connfd);  //consider moving to inside the global lock
         pthread_mutex_lock(&global_lock);
-        if (is_overload(&req_queue)){
+        if (is_overload()){
             switch (alg)
             {
             case block:
-                while(is_overload(&req_queue)){
+                while(is_overload()){
                     pthread_cond_wait(&queue_not_full, &global_lock);
                     pthread_mutex_lock(&global_lock)
                 }
@@ -148,19 +147,19 @@ int main(int argc, char *argv[])
             case drop_tail:
                 break;
             case drop_random:
-                q_drop_random(&req_queue);
+                q_drop_random();
                 break;
-            default: //drop_head
-                q_del(&req_queue, 0); 
+            default: //drop_head (in our impl its "drop queue[tail]")
+                q_del(0); 
                 break;
             }
         }
         
-        if(is_overload(&req_queue)) //for (drop_tail) and (drop_random with no pendings) cases
+        if(is_overload()) //for (drop_tail) and (drop_random with no pendings) cases
             req_destroy(new_req);
 
         else{
-            q_push(&req_queue, new_req);
+            q_push(new_req);
             pthread_cond_signal(&pend_and_free);
         }
         pthread_mutex_unlock(&global_lock);
@@ -168,7 +167,7 @@ int main(int argc, char *argv[])
 }
 
 //with lock
-bool q_initialize(Queue q, int max_size){
+bool q_initialize(int max_size){
     if(max_size <= 0 || (q->pendings = malloc(size(Req) * max_size))==NULL)
         return false;
     q->max = max_size;
@@ -181,7 +180,7 @@ bool q_initialize(Queue q, int max_size){
 
 //with lock
 //naive destroy (meanng only frees its value, rather then calling generic given destroy function)
-void q_destroy(Queue q){
+void q_destroy(){
     for(int pos=0; pos < q->size; ++pos){
         free(q_get(q, pos));
     }
@@ -189,19 +188,19 @@ void q_destroy(Queue q){
 }
 
 //with lock
-void q_push(Queue q, Req req){
+void q_push(Req req){
     if(q->total_count == q->max)
         return; // consider printing err or returning false
-    q_set(q,q->size, req);
+    q_set(q->size, req);
     q->size++;
     q->total_count++;
 }
 
 //with lock
-Req q_pop(Queue q){
+Req q_pop(){
     if (q->size == 0)
         return NULL;
-    Req req = q_get(q, 0);
+    Req req = q_get(0);
     q->tail = (q->tail+1)%(q->max);
     q->size--;
     // we preform the q->total_count-- only after worker finished handling request
@@ -209,17 +208,17 @@ Req q_pop(Queue q){
 }
 
 //with lock
-Req q_get(Queue q, int pos){
+Req q_get(int pos){
     return q->pendings[(q->tail+pos)%q->max];
 }
 
 //with lock
-void q_set(Queue q, int pos, Req req){
+void q_set(int pos, Req req){
     q->pendings[(q->tail+pos)%q->max] = req;
 }
 
 //with lock
-bool q_del(Queue q, int pos){
+bool q_del(int pos){
     if(pos < 0 || pos>q->size)
         return false;
     req_destroy(q_get(q,pos));
@@ -229,13 +228,13 @@ bool q_del(Queue q, int pos){
 }
 
 //with lock
-void q_drop_random(Queue q){
+void q_drop_random(){
     for(int i=0; 0<(q->size) && i<(q->drop); ++i){
         int pos = rand() % q->size;
-        q_del(q,pos);
+        q_del(pos);
         //updating queue (narrowing gaps)
         for(int j=0; j<pos; ++j){
-            q_set(q,pos-j, q_get(q, pos-j-1));
+            q_set(pos-j, q_get(pos-j-1));
         }
     }
 }
