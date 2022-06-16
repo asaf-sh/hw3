@@ -1,5 +1,6 @@
 #include "segel.h"
 #include "request.h"
+#include "server.h"
 
 #define EMPTY_REQ (-1)
 
@@ -12,45 +13,18 @@
 enum schedalg {block, drop_tail, drop_head, drop_random};
 enum req_type {static, dynamic};
 
-typedef struct thread_stats_t{
-    int tid;
-    int req_count;
-    int static_count;
-    int dynamic_count;
-} *TStats;
 
-typedef struct req_t{
-    int fd;
-    enum req_type type;
-    struct timeval arrival_time;
-    struct timeval dispatch_interval;
-    TStats handler_thread_stats;
-} *Req;
+///////////// GLOBAL VARIABLES //////////////////
 
-typedef struct queue_t{
-    int max;
-    int drop;
-    int size;  //pending count
-    int total_count;
-    Req *pendings;
-    int tail;
-} *Queue;
+pthread_mutex_t global_lock;  //for every access to req_queue and for conditions
 
-void req_destroy(Req req){
-    close(req->fd);
-    if(req->handler_thread_stats)
-        free(req->handler_thread_stats);
-    free(req);
-}
+pthread_cond_t pend_and_free;  //availiable pending for workers
 
-bool q_initialize(int max_size);
-void q_destroy();
-void q_push(void* val);
-Req q_pop();
-Req q_get(int pos);
-void q_set(int pos, Req req);
+pthread_cond_t queue_not_full;  //availiable slots for new pendings (for 'block' schedlag)
 
-Req create_new_request(int connfd);  // TADA!
+struct queue_t req_queue;
+
+Queue q = &req_queue;
 
 
 void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_size, enum schedalg *alg)
@@ -81,36 +55,29 @@ void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_si
     }
 }
 
-//TADA
-void* work(void* ptr) {
-    while (requests =) {
-        pthread_cond_wait(&pend_and_free, &global_lock);
-        pthread_mutex_lock(&global_lock);
-        if (requests) {
-            '''need to assign job to itself'''
-        }
-
-    }
-
-}
-
 static void initialize_threads(int thread_count, pthread_t *workers){
     for (i = 0, i < thread_count, i++) {
-        pthread_create(&workers[i], NULL, work);
+        pthread_create(&workers[i], NULL, work, &i);
     }
 }
-
 
 //with lock
 static inline is_overload(){
     return q->total_count == q->max;
 }
-//in use for push&pop pending request by main | workers
-pthread_mutex_t global_lock;  //for every access to req_queue and for conditions
-pthread_cond_t pend_and_free;  //availiable pending for workers
-pthread_cond_t queue_not_full;  //availiable slots for new pendings (for 'block' schedlag)
-struct queue_t req_queue;
-Queue q = &req_queue;
+
+//TADA
+void* work(void* ptr) {
+    struct thread_stats_t stats = { *((int*)ptr), 0, 0, 0 }
+        while (true) {
+            Req req = wait_n_fetch();
+            req->dispatch_interval =
+                stats.req_count++;
+            requestHandle(req->fd, req, &stats);
+            finish_req(req);
+        }
+
+}
 
 int main(int argc, char *argv[])
 {
@@ -165,6 +132,8 @@ int main(int argc, char *argv[])
         pthread_mutex_unlock(&global_lock);
     }
 }
+
+/////////  QUEUE FUNCTIONS IMPLEMENTATION ////////////
 
 //with lock
 bool q_initialize(int max_size){
@@ -239,5 +208,27 @@ void q_drop_random(){
     }
 }
 
+/////////////// REQUEST FUNCTIONS IMPLEMENTATION ///////////////////
+
+Req create_new_request(int connfd);  // TADA!
+
+Req wait_n_fetch() {
+    pthread_mutex_lock(&global_lock);
+    while (q->size == 0) {
+        pthread_cond_wait(&pend_and_free, &global_lock);
+        pthread_mutex_lock(&global_lock);
+    }
+    Req req = q_pop();
+    pthread_mutex_unlock(&global_lock);
+    return req;
+}
+
+void finish_req(Req req) {
+    pthread_mutex_lock(&global_lock);
+    req_destroy(req);
+    q->total_count--;
+    pthread_cond_signal(&queue_not_full, &global_lock);
+    pthread_mutex_unlock(&global_lock);
+}
 
  
