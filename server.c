@@ -42,7 +42,7 @@ void* Malloc(size_t size){
 
 void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_size, enum schedalg *alg)
 {
-    if (argc != 4) {
+    if (argc != 5) {
 	    fprintf(stderr, "Usage: %s <port> <threads> <queue_size> <schedalg>\n", argv[0]);
 	    exit(1);
     }
@@ -66,6 +66,7 @@ void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_si
         fprintf(stderr, "<schedalg>: \"block\" | \"dt\" | \"dh\" | \"random\"");
 	    exit(1);
     }
+    printf("finished getargs\n");
 }
 
 
@@ -86,6 +87,7 @@ void* work(void* ptr) {
     struct thread_stats_t stats = { *((int*)ptr), 0, 0, 0 };
         while (true) {
             Req req = wait_n_fetch();
+	    printf("thread fetched request %d\n", stats.tid);
             set_dispatch_time(req);
             stats.req_count++;
             requestHandle(req->fd, req, &stats);
@@ -100,6 +102,7 @@ static void initialize_threads(int thread_count, pthread_t *workers){
 }
 int main(int argc, char *argv[])
 {
+    printf("TADA - in main\n");
     int listenfd, connfd, port, clientlen, queue_size, thread_count;
     enum schedalg alg;
     struct sockaddr_in clientaddr;
@@ -110,17 +113,20 @@ int main(int argc, char *argv[])
 
     pthread_t *workers = Malloc(thread_count * sizeof(pthread_t));
     initialize_threads(thread_count, workers);
-
+    printf("finished initialization\n");
     listenfd = Open_listenfd(port);
     while (1) {
         clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
+	printf("got new connection\n");
         Req new_req = create_new_request(connfd);  //consider moving to inside the global lock
         pthread_mutex_lock(&global_lock);
+	printf("main in lock\n");
         if (is_overload()){
             switch (alg)
             {
             case block:
+		    printf("main in block case\n");
                 while(is_overload()){
                     pthread_cond_wait(&queue_not_full, &global_lock);
                     pthread_mutex_lock(&global_lock);
@@ -142,9 +148,12 @@ int main(int argc, char *argv[])
 
         else{
             q_push(new_req);
+	    printf("request added to pending\n");
             pthread_cond_signal(&pend_and_free);
         }
+	printf("main try lock\n");
         pthread_mutex_unlock(&global_lock);
+	printf("main unlocked\n");
     }
 }
 
@@ -238,8 +247,11 @@ Req create_new_request(int connfd){
 Req wait_n_fetch() {
     pthread_mutex_lock(&global_lock);
     while (q->size == 0) {
+	    printf("thread %ld is waiting\n", pthread_self());
         pthread_cond_wait(&pend_and_free, &global_lock);
-        pthread_mutex_lock(&global_lock);
+	    printf("thread %ld done waiting\n", pthread_self());
+        //pthread_mutex_lock(&global_lock);
+	  //  printf("thread %ld accuired lock after waiting\n", pthread_self());
     }
     Req req = q_pop();
     pthread_mutex_unlock(&global_lock);
