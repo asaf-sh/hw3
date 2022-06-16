@@ -41,3 +41,7 @@ void q_set(int pos, Req req);
 void finish_req(Req req);
 
 Req wait_n_fetch();
+
+void q_drop_random();
+
+bool q_del(int pos);
