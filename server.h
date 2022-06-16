@@ -7,7 +7,6 @@ typedef struct thread_stats_t {
 
 typedef struct req_t {
     int fd;
-    enum req_type type;
     struct timeval arrival_time;
     struct timeval dispatch_interval;
     TStats handler_thread_stats;

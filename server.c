@@ -1,6 +1,7 @@
 #include "segel.h"
 #include "request.h"
-#include "server.h"
+#include <assert.h>
+
 
 #define EMPTY_REQ (-1)
 
@@ -11,7 +12,11 @@
 #define RANDOM ("random")
 
 enum schedalg {block, drop_tail, drop_head, drop_random};
-enum req_type {static, dynamic};
+
+Req create_new_request(int connfd);
+
+void q_drop_random();
+
 
 
 ///////////// GLOBAL VARIABLES //////////////////
@@ -48,13 +53,13 @@ void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_si
         *alg = block;
     }
     else if(strcmp(argv[4], DT) == 0){
-        *alg = dt;
+        *alg = drop_tail;
     }
     else if(strcmp(argv[4], DH) == 0){
-        *alg = dh;
+        *alg = drop_head;
     }
     else if(strcmp(argv[4], RANDOM) == 0){
-        *alg = random;
+        *alg = drop_random;
     }
     else{
         fprintf(stderr, "<schedalg>: \"block\" | \"dt\" | \"dh\" | \"random\"");
@@ -62,14 +67,9 @@ void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_si
     }
 }
 
-static void initialize_threads(int thread_count, pthread_t *workers){
-    for (i = 0, i < thread_count, i++) {
-        pthread_create(&workers[i], NULL, work, &i);
-    }
-}
 
 //with lock
-static inline is_overload(){
+static inline bool is_overload(){
     return q->total_count == q->max;
 }
 
@@ -82,7 +82,7 @@ void set_dispatch_time(Req req){
 }
 
 void* work(void* ptr) {
-    struct thread_stats_t stats = { *((int*)ptr), 0, 0, 0 }
+    struct thread_stats_t stats = { *((int*)ptr), 0, 0, 0 };
         while (true) {
             Req req = wait_n_fetch();
             set_dispatch_time(req);
@@ -92,10 +92,15 @@ void* work(void* ptr) {
         }
 }
 
+static void initialize_threads(int thread_count, pthread_t *workers){
+    for (int i = 0; i < thread_count; i++) {
+        pthread_create(&workers[i], NULL, work, &i);
+    }
+}
 int main(int argc, char *argv[])
 {
     int listenfd, connfd, port, clientlen, queue_size, thread_count;
-    enum sched alg;
+    enum schedalg alg;
     struct sockaddr_in clientaddr;
 
     getargs(argc, argv, &port, &thread_count, &queue_size, &alg);
@@ -113,7 +118,7 @@ int main(int argc, char *argv[])
     while (1) {
         clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
-        Req new_req = create_new_req(connfd);  //consider moving to inside the global lock
+        Req new_req = create_new_request(connfd);  //consider moving to inside the global lock
         pthread_mutex_lock(&global_lock);
         if (is_overload()){
             switch (alg)
