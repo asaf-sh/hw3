@@ -4,7 +4,6 @@
 
 #include "segel.h"
 #include "request.h"
-#include "server.h"
 
 // requestError(      fd,    filename,        "404",    "Not found", "OS-HW3 Server could not find this file");
 void requestError(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) 
@@ -103,9 +102,9 @@ void requestGetFiletype(char *filename, char *filetype)
 }
 
 void add_statistics(char* buf, Req req){
-   sprintf(buf, "%sStat-Req-Arrival:: %lu.06lu\r\n", buf, req->arrival_time.tv_sec, req->arrival_time.tv_usec);
+   sprintf(buf, "%sStat-Req-Arrival:: %lu.%06lu\r\n", buf, req->arrival_time.tv_sec, req->arrival_time.tv_usec);
 
-   sprintf(buf, "%sStat-Req-Dispatch:: %lu.06lu\r\n", buf, req->dispatch_interval.tv_sec, req->dispatch_interval.tv_usec);
+   sprintf(buf, "%sStat-Req-Dispatch:: %lu.%06lu\r\n", buf, req->dispatch_interval.tv_sec, req->dispatch_interval.tv_usec);
 
    sprintf(buf, "%sStat-Thread-Id:: %d\r\n", buf, req->handler_thread_stats.tid);
 
@@ -169,7 +168,7 @@ void requestServeStatic(int fd, char *filename, int filesize, Req req)
 }
 
 // handle a request
-void requestHandle(int fd, Req req, TStat* thread_stats)
+void requestHandle(int fd, Req req, TStats* thread_stats)
 {
 
    int is_static;

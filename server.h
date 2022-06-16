@@ -21,16 +21,13 @@ typedef struct queue_t {
     int tail;
 } *Queue;
 
-void req_destroy(Req req) {
-    close(req->fd);
-    free(req);
-}
+void req_destroy(Req req);
 
 bool q_initialize(int max_size);
 
 void q_destroy();
 
-void q_push(void* val);
+void q_push(Req val);
 
 Req q_pop();
 

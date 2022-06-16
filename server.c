@@ -1,6 +1,7 @@
 #include "segel.h"
 #include "request.h"
 #include <assert.h>
+#include <math.h>
 
 
 #define EMPTY_REQ (-1)
@@ -105,10 +106,6 @@ int main(int argc, char *argv[])
 
     getargs(argc, argv, &port, &thread_count, &queue_size, &alg);
 
-
-    int busy_threads = 0;
-    int requests = 0;
-
     q_initialize(queue_size);
 
     pthread_t *workers = Malloc(thread_count * sizeof(pthread_t));
@@ -126,7 +123,7 @@ int main(int argc, char *argv[])
             case block:
                 while(is_overload()){
                     pthread_cond_wait(&queue_not_full, &global_lock);
-                    pthread_mutex_lock(&global_lock)
+                    pthread_mutex_lock(&global_lock);
                 }
                 break;
             case drop_tail:
@@ -155,10 +152,11 @@ int main(int argc, char *argv[])
 
 //with lock
 bool q_initialize(int max_size){
-    if(max_size <= 0 || (q->pendings = Malloc(size(Req) * max_size))==NULL)
-        return false;
+    if(max_size < 1)
+	app_error("queue size invalid");
+    q->pendings = Malloc(sizeof(struct req_t) * max_size);
     q->max = max_size;
-    q->drop = ceil((double)max_size * 0.3)
+    q->drop = ceil((double)max_size * 0.3);
     q->size = 0;
     q->total_count = 0;
     q->tail = 0;
@@ -169,7 +167,7 @@ bool q_initialize(int max_size){
 //naive destroy (meanng only frees its value, rather then calling generic given destroy function)
 void q_destroy(){
     for(int pos=0; pos < q->size; ++pos){
-        free(q_get(q, pos));
+        free(q_get(pos));
     }
     free(q->pendings);
 }
@@ -208,7 +206,7 @@ void q_set(int pos, Req req){
 bool q_del(int pos){
     if(pos < 0 || pos>q->size)
         return false;
-    req_destroy(q_get(q,pos));
+    req_destroy(q_get(pos));
     q->size--;
     q->total_count--;
     return true;
@@ -232,7 +230,7 @@ void q_drop_random(){
 Req create_new_request(int connfd){
    Req req = Malloc(sizeof(struct req_t));
    req->fd = connfd;
-   int rc = gettimeofday(&req->arrival_time, NULL)
+   int rc = gettimeofday(&req->arrival_time, NULL);
     assert(rc == 0);
    return req;
 }
@@ -252,8 +250,12 @@ void finish_req(Req req) {
     pthread_mutex_lock(&global_lock);
     req_destroy(req);
     q->total_count--;
-    pthread_cond_signal(&queue_not_full, &global_lock);
+    pthread_cond_signal(&queue_not_full);
     pthread_mutex_unlock(&global_lock);
 }
 
  
+void req_destroy(Req req) {
+    close(req->fd);
+    free(req);
+}
