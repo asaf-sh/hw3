@@ -26,6 +26,13 @@ struct queue_t req_queue;
 
 Queue q = &req_queue;
 
+//malloc wraper to handle errors
+void* Malloc(size_t size){
+    void* ptr = malloc(size);
+    if(ptr == NULL)
+        app_error("malloc failed");
+    return ptr;
+}
 
 void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_size, enum schedalg *alg)
 {
@@ -66,17 +73,23 @@ static inline is_overload(){
     return q->total_count == q->max;
 }
 
-//TADA
+void set_dispatch_time(Req req){
+    struct timeval curr;
+    int rc = gettimeofday(&curr, NULL);
+    assert(rc == 0);
+    req->dispatch_interval.tv_sec = curr.tv_sec - req->arrival_time.tv_sec;
+    req->dispatch_interval.tv_usec = curr.tv_usec - req->arrival_time.tv_usec;
+}
+
 void* work(void* ptr) {
     struct thread_stats_t stats = { *((int*)ptr), 0, 0, 0 }
         while (true) {
             Req req = wait_n_fetch();
-            req->dispatch_interval =
-                stats.req_count++;
+            set_dispatch_time(req);
+            stats.req_count++;
             requestHandle(req->fd, req, &stats);
             finish_req(req);
         }
-
 }
 
 int main(int argc, char *argv[])
@@ -93,7 +106,7 @@ int main(int argc, char *argv[])
 
     q_initialize(queue_size);
 
-    pthread_t *workers = malloc(thread_count * sizeof(pthread_t));
+    pthread_t *workers = Malloc(thread_count * sizeof(pthread_t));
     initialize_threads(thread_count, workers);
 
     listenfd = Open_listenfd(port);
@@ -137,7 +150,7 @@ int main(int argc, char *argv[])
 
 //with lock
 bool q_initialize(int max_size){
-    if(max_size <= 0 || (q->pendings = malloc(size(Req) * max_size))==NULL)
+    if(max_size <= 0 || (q->pendings = Malloc(size(Req) * max_size))==NULL)
         return false;
     q->max = max_size;
     q->drop = ceil((double)max_size * 0.3)
@@ -210,7 +223,14 @@ void q_drop_random(){
 
 /////////////// REQUEST FUNCTIONS IMPLEMENTATION ///////////////////
 
-Req create_new_request(int connfd);  // TADA!
+
+Req create_new_request(int connfd){
+   Req req = Malloc(sizeof(struct req_t));
+   req->fd = connfd;
+   int rc = gettimeofday(&req->arrival_time, NULL)
+    assert(rc == 0);
+   return req;
+}
 
 Req wait_n_fetch() {
     pthread_mutex_lock(&global_lock);

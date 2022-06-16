@@ -102,7 +102,21 @@ void requestGetFiletype(char *filename, char *filetype)
       strcpy(filetype, "text/plain");
 }
 
-void requestServeDynamic(int fd, char *filename, char *cgiargs)
+void add_statistics(char* buf, Req req){
+   sprintf(buf, "%sStat-Req-Arrival:: %lu.06lu\r\n", buf, req->arrival_time.tv_sec, req->arrival_time.tv_usec);
+
+   sprintf(buf, "%sStat-Req-Dispatch:: %lu.06lu\r\n", buf, req->dispatch_interval.tv_sec, req->dispatch_interval.tv_usec);
+
+   sprintf(buf, "%sStat-Thread-Id:: %d\r\n", buf, req->handler_thread_stats.tid);
+
+   sprintf(buf, "%sStat-Thread-Count:: %d\r\n", buf, req->handler_thread_stats.req_count);
+
+   sprintf(buf, "%sStat-Thread-Static:: %d\r\n", buf, req->handler_thread_stats.static_count);
+
+   sprintf(buf, "%sStat-Thread-Dynamic:: %d\r\n\r\n", buf, req->handler_thread_stats.dynamic_count);
+}
+
+void requestServeDynamic(int fd, char *filename, char *cgiargs, Req req)
 {
    char buf[MAXLINE], *emptylist[] = {NULL};
 
@@ -110,6 +124,7 @@ void requestServeDynamic(int fd, char *filename, char *cgiargs)
    // The CGI script has to finish writing out the header.
    sprintf(buf, "HTTP/1.0 200 OK\r\n");
    sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
+   add_statistics(buf, req);
 
    Rio_writen(fd, buf, strlen(buf));
 
@@ -143,6 +158,7 @@ void requestServeStatic(int fd, char *filename, int filesize, Req req)
    sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
    sprintf(buf, "%sContent-Length: %d\r\n", buf, filesize);
    sprintf(buf, "%sContent-Type: %s\r\n\r\n", buf, filetype);
+   add_statistics(buf, req);
 
    Rio_writen(fd, buf, strlen(buf));
 
@@ -181,22 +197,22 @@ void requestHandle(int fd, Req req, TStat* thread_stats)
    }
 
    if (is_static) {
-       thread_stats->static_count++;
-       req->handler_thread_stats = *thread_stats;
       if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
          requestError(fd, filename, "403", "Forbidden", "OS-HW3 Server could not read this file");
          return;
       }
+      thread_stats->static_count++;
+      req->handler_thread_stats = *thread_stats;
       requestServeStatic(fd, filename, sbuf.st_size, req);
    } else {
-       thread_stats->dynamic_count++;
-       req->handler_thread_stats = *thread_stats;
+       
       if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
          requestError(fd, filename, "403", "Forbidden", "OS-HW3 Server could not run this CGI program");
          return;
       }
+      thread_stats->dynamic_count++;
+      req->handler_thread_stats = *thread_stats;
       requestServeDynamic(fd, filename, cgiargs, req);
    }
 }
-
 
