@@ -66,7 +66,7 @@ void getargs(int argc, char *argv[], int *port, int* thread_count, int *queue_si
         fprintf(stderr, "<schedalg>: \"block\" | \"dt\" | \"dh\" | \"random\"");
 	    exit(1);
     }
-    printf("finished getargs\n");
+    //printf("finished getargs\n");
 }
 
 
@@ -87,9 +87,10 @@ void* work(void* ptr) {
     struct thread_stats_t stats = { *((int*)ptr), 0, 0, 0 };
         while (true) {
             Req req = wait_n_fetch();
-	    printf("thread fetched request %d\n", stats.tid);
+	    //printf("thread fetched request %d\n", stats.tid);
             set_dispatch_time(req);
             stats.req_count++;
+	    req->handler_thread_stats = stats;
             requestHandle(req->fd, req, &stats);
             finish_req(req);
         }
@@ -102,7 +103,7 @@ static void initialize_threads(int thread_count, pthread_t *workers){
 }
 int main(int argc, char *argv[])
 {
-    printf("TADA - in main\n");
+   // printf("TADA - in main\n");
     int listenfd, connfd, port, clientlen, queue_size, thread_count;
     enum schedalg alg;
     struct sockaddr_in clientaddr;
@@ -113,23 +114,22 @@ int main(int argc, char *argv[])
 
     pthread_t *workers = Malloc(thread_count * sizeof(pthread_t));
     initialize_threads(thread_count, workers);
-    printf("finished initialization\n");
+    //printf("finished initialization\n");
     listenfd = Open_listenfd(port);
     while (1) {
         clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
-	printf("got new connection\n");
+	//printf("got new connection\n");
         Req new_req = create_new_request(connfd);  //consider moving to inside the global lock
         pthread_mutex_lock(&global_lock);
-	printf("main in lock\n");
+	//printf("main in lock\n");
         if (is_overload()){
             switch (alg)
             {
             case block:
-		    printf("main in block case\n");
+		    //printf("main in block case\n");
                 while(is_overload()){
                     pthread_cond_wait(&queue_not_full, &global_lock);
-                    pthread_mutex_lock(&global_lock);
                 }
                 break;
             case drop_tail:
@@ -138,7 +138,7 @@ int main(int argc, char *argv[])
                 q_drop_random();
                 break;
             default: //drop_head (in our impl its "drop queue[tail]")
-                q_del(0); 
+        	q_del(0); 
                 break;
             }
         }
@@ -148,12 +148,12 @@ int main(int argc, char *argv[])
 
         else{
             q_push(new_req);
-	    printf("request added to pending\n");
+	    //printf("request added to pending\n");
             pthread_cond_signal(&pend_and_free);
         }
-	printf("main try lock\n");
+	//printf("main try lock\n");
         pthread_mutex_unlock(&global_lock);
-	printf("main unlocked\n");
+	//printf("main unlocked\n");
     }
 }
 
@@ -176,7 +176,7 @@ bool q_initialize(int max_size){
 //naive destroy (meanng only frees its value, rather then calling generic given destroy function)
 void q_destroy(){
     for(int pos=0; pos < q->size; ++pos){
-        free(q_get(pos));
+        req_destroy(q_get(pos));
     }
     free(q->pendings);
 }
@@ -189,12 +189,12 @@ void q_push(Req req){
     q->size++;
     q->total_count++;
 }
-
 //with lock
 Req q_pop(){
     if (q->size == 0)
         return NULL;
     Req req = q_get(0);
+    q_set(0, NULL);
     q->tail = (q->tail+1)%(q->max);
     q->size--;
     // we preform the q->total_count-- only after worker finished handling request
@@ -213,7 +213,7 @@ void q_set(int pos, Req req){
 
 //with lock
 bool q_del(int pos){
-    if(pos < 0 || pos>q->size)
+    if(pos < 0 || pos>=q->size)
         return false;
     req_destroy(q_get(pos));
     q->size--;
@@ -223,7 +223,8 @@ bool q_del(int pos){
 
 //with lock
 void q_drop_random(){
-    for(int i=0; 0<(q->size) && i<(q->drop); ++i){
+    int i=0;
+    for(; 0<(q->size) && i<(q->drop); ++i){
         int pos = rand() % q->size;
         q_del(pos);
         //updating queue (narrowing gaps)
@@ -231,6 +232,7 @@ void q_drop_random(){
             q_set(pos-j, q_get(pos-j-1));
         }
     }
+    q->tail = (q->tail+i)%q->max;
 }
 
 /////////////// REQUEST FUNCTIONS IMPLEMENTATION ///////////////////
@@ -247,11 +249,11 @@ Req create_new_request(int connfd){
 Req wait_n_fetch() {
     pthread_mutex_lock(&global_lock);
     while (q->size == 0) {
-	    printf("thread %ld is waiting\n", pthread_self());
+	    //printf("thread %ld is waiting\n", pthread_self());
         pthread_cond_wait(&pend_and_free, &global_lock);
-	    printf("thread %ld done waiting\n", pthread_self());
+	    //printf("thread %ld done waiting\n", pthread_self());
         //pthread_mutex_lock(&global_lock);
-	  //  printf("thread %ld accuired lock after waiting\n", pthread_self());
+	  //  //printf("thread %ld accuired lock after waiting\n", pthread_self());
     }
     Req req = q_pop();
     pthread_mutex_unlock(&global_lock);

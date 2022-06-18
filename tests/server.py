@@ -18,6 +18,7 @@ class Server:
     def __enter__(self):
         self.process = Popen([self.path, self.port, self.threads, self.queue_size,
                              self.policy], stdout=PIPE, stderr=PIPE, cwd="..", bufsize=0, encoding=sys.getdefaultencoding())
+        #print("TADA- opened server process\n")
         return self.process
 
     def __exit__(self, exc_type, exc_value, exc_traceback):

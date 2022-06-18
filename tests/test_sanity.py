@@ -13,6 +13,7 @@ def test_static(server_port):
         sleep(0.1)
         with FuturesSession() as session:
             future = session.get(f"http://localhost:{server_port}/home.html")
+            #print("TADA - sent get to server\n")
             response = future.result()
             expected_headers = generate_static_headers(293, 1, 1, 0)
             expected = STATIC_OUTPUT_CONTENT
